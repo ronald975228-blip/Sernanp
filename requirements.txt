@@ -1,0 +1,375 @@
+from flask import Flask, render_template, request, send_file, jsonify
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+import io, json, datetime
+
+app = Flask(__name__)
+
+INDICADORES = [
+    {'eas':'EAS-1','label':'EAS-1: Evaluación y gestión de riesgos e impactos ambientales y sociales'},
+    {'n':1,'act':'Gestión Ambiental en ANP','ind':'N° de informes de seguimiento a ≥10% de proyectos habilitados (construcción, operación o cierre)','u':'Informe','mv':'Informe de seguimiento a los proyectos'},
+    {'n':2,'act':'Gestión Ambiental en ANP','ind':'N° de infraestructuras con conformidad y compatibilidad de la DGANP','u':'Infraestructura','mv':'Informe DGANP - conformidad y compatibilidad'},
+    {'eas':'EAS-2','label':'EAS-2: Trabajo y condiciones laborales — Guardaparques y personal ANP'},
+    {'n':3,'act':'Vigilancia y Control','ind':'Capacitaciones en prevención de riesgos laborales (puesto de trabajo)','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':4,'act':'Vigilancia y Control','ind':'Capacitaciones sobre patrullajes acuáticos','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':5,'act':'Vigilancia y Control','ind':'Capacitaciones sobre patrullajes terrestres','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':6,'act':'Vigilancia y Control','ind':'Capacitaciones sobre hallazgos y avistamientos de PIACI','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':7,'act':'Vigilancia y Control','ind':'Reportes de hallazgos/avistamientos de PIACI enviados a MINCUL','u':'Reporte','mv':'Reportes enviados a MINCUL'},
+    {'n':8,'act':'Vigilancia y Control','ind':'Capacitaciones en rescate de alta montaña / alta mar / vía fluvial','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':9,'act':'Vigilancia y Control','ind':'Puestos de vigilancia con números de emergencia visibles','u':'Puesto de Vigilancia','mv':'Foto del número de emergencia en el PVC'},
+    {'n':10,'act':'Vigilancia y Control','ind':'Puestos de vigilancia con flujograma de comunicación visible','u':'Puesto de Vigilancia','mv':'Foto del flujograma en el PVC'},
+    {'n':11,'act':'Vigilancia y Control','ind':'Capacitaciones en primeros auxilios','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':12,'act':'Vigilancia y Control','ind':'Puestos de vigilancia con botiquín de primeros auxilios equipado','u':'Puesto de Vigilancia','mv':'Foto del botiquín en el PVC'},
+    {'n':13,'act':'Vigilancia y Control','ind':'Capacitaciones sobre conducción de vehículos / embarcaciones','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':14,'act':'Vigilancia y Control','ind':'Capacitaciones sobre riesgos biológicos (vectores)','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':15,'act':'Vigilancia y Control','ind':'Capacitaciones en los procesos de intervención','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':16,'act':'Vigilancia y Control','ind':'Capacitaciones para prevenir y tratar mordeduras de reptiles u otros animales','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'eas':'EAS-3','label':'EAS-3: Eficiencia en el uso de recursos y gestión de contaminación'},
+    {'n':17,'act':'Gestión Ambiental','ind':'Capacitaciones al personal sobre manejo de residuos sólidos','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':18,'act':'Gestión Ambiental','ind':'Planes de gestión de residuos sólidos elaborados/actualizados','u':'Plan','mv':'Plan aprobado por la DGANP'},
+    {'n':19,'act':'Gestión Ambiental','ind':'Informes trimestrales de gestión de residuos sólidos','u':'Informe','mv':'4 informes trimestrales'},
+    {'eas':'EAS-4','label':'EAS-4: Salud y seguridad de la comunidad — Turismo y aprovechamiento'},
+    {'n':20,'act':'Turismo','ind':'Capacitaciones en identificación de peligros/riesgos en rutas turísticas','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':21,'act':'Turismo','ind':'Capacitaciones en primeros auxilios para emergencias turísticas','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':22,'act':'Turismo','ind':'Señaléticas instaladas para prevenir accidentes en el ANP','u':'Señalética','mv':'Fotos de señaléticas instaladas'},
+    {'n':23,'act':'Turismo','ind':'Planes de Sitio con medidas/normas de seguridad','u':'Plan de Sitio','mv':'Plan de Sitio aprobado'},
+    {'n':24,'act':'Turismo','ind':'Capacitaciones a operadores de turismo sobre riesgos del ANP','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':25,'act':'Turismo','ind':'Capacitaciones a visitantes para prevenir accidentes en el ANP','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'n':26,'act':'Recursos Naturales','ind':'Planes de Manejo de Recursos con recomendaciones de seguridad','u':'Plan de Manejo','mv':'Plan aprobado'},
+    {'n':27,'act':'Recursos Naturales','ind':'Capacitaciones a usuarios de aprovechamiento sobre medidas de seguridad','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'eas':'EAS-5','label':'EAS-5: Adquisición de tierras y restricciones sobre uso de la tierra'},
+    {'n':28,'act':'Consulta y Participación','ind':'Talleres de consulta previa por cambio de zonificación o establecimiento de nuevas ANP','u':'Taller','mv':'Informe con lista de asistencia, fotos'},
+    {'n':29,'act':'Consulta y Participación','ind':'Actas de reuniones descentralizadas con PI y comunidades (zonificación, Planes Maestros)','u':'Actas','mv':'Carpeta con actas de todas las reuniones'},
+    {'n':30,'act':'Acciones Comunicativas','ind':'Actividades comunicativas en consulta previa (enfoque intercultural, intergeneracional, género)','u':'Acción','mv':'Fotos, flyers, links de publicación'},
+    {'eas':'EAS-7','label':'EAS-7: Pueblos indígenas / comunidades locales tradicionales'},
+    {'n':31,'act':'Consulta y Participación','ind':'Informes del Mapa de Actores con identificación de PI y comunidades locales','u':'Informe semestral','mv':'Informe del Mapa de Actores'},
+    {'n':32,'act':'Consulta y Participación','ind':'Actas de reuniones en espacios/mecanismos participativos con PI (CG, AdC, VC, GPV, ECA)','u':'Actas','mv':'Carpeta con actas de todas las reuniones'},
+    {'n':33,'act':'Acciones Comunicativas','ind':'Actividades comunicativas con actores (enfoque intercultural, intergeneracional, género)','u':'Acción','mv':'Fotos, flyers, links de publicación'},
+    {'eas':'EAS-8','label':'EAS-8: Patrimonio cultural — Saberes ancestrales y PIACI'},
+    {'n':34,'act':'Enfoque Intercultural','ind':'Informes de recopilación de saberes ancestrales','u':'Informe','mv':'Informe de recopilación'},
+    {'n':35,'act':'Enfoque Intercultural','ind':'Plan de Contingencia Antropológica para PIACI aprobado e implementado','u':'Documento','mv':'Documento aprobado e implementado'},
+    {'n':36,'act':'Enfoque Intercultural','ind':'Capacitaciones sobre enfoque intercultural al personal del ANP','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+    {'eas':'EAS-10','label':'EAS-10: Participación de partes involucradas y divulgación de información'},
+    {'n':37,'act':'Sistematización','ind':'Reportes de alerta de conflictos socioambientales en el ANP y ZA (RATCS)','u':'Reporte','mv':'Informe o Reporte'},
+    {'n':38,'act':'Sistematización','ind':'Registros del MAQS (Mecanismo de Atención de Quejas, Consultas y Sugerencias)','u':'Reporte','mv':'Informe o Reporte MAQS'},
+    {'n':39,'act':'Participación','ind':'Capacitaciones al personal en uso y gestión del MAQS','u':'Capacitación','mv':'Lista de asistencia, fotos'},
+]
+
+def thin(color='C8D6E5'):
+    s = Side(style='thin', color=color)
+    return Border(left=s, right=s, top=s, bottom=s)
+
+def fill(hex_color):
+    return PatternFill('solid', fgColor=hex_color)
+
+def hdr(cell, bg='2E75B6', fg='FFFFFF', bold=True, size=9, wrap=False, align='center'):
+    cell.font = Font(bold=bold, color=fg, size=size, name='Arial')
+    cell.fill = fill(bg)
+    cell.alignment = Alignment(horizontal=align, vertical='center', wrap_text=wrap)
+    cell.border = thin('1F3864')
+
+def dat(cell, wrap=False, align='left', bold=False, bg=None, fg='1a1a1a', size=8.5):
+    cell.font = Font(bold=bold, color=fg, size=size, name='Arial')
+    cell.alignment = Alignment(horizontal=align, vertical='center', wrap_text=wrap)
+    cell.border = thin()
+    if bg:
+        cell.fill = fill(bg)
+
+def calc(cell):
+    cell.font = Font(bold=True, color='0C447C', size=8.5, name='Arial')
+    cell.fill = fill('EBF3FB')
+    cell.alignment = Alignment(horizontal='center', vertical='center')
+    cell.border = thin()
+
+def generar_excel(data):
+    p = data.get('portada', {})
+    ejec = data.get('ejecucion', {})
+    concl = data.get('conclusiones', {})
+    medios = data.get('medios', {})
+
+    wb = Workbook()
+
+    # ── PORTADA ────────────────────────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = 'PORTADA'
+    ws1.sheet_view.showGridLines = False
+    ws1.column_dimensions['A'].width = 3
+    ws1.column_dimensions['B'].width = 30
+    ws1.column_dimensions['C'].width = 22
+    ws1.column_dimensions['D'].width = 26
+    ws1.column_dimensions['E'].width = 22
+    ws1.column_dimensions['F'].width = 3
+
+    ws1.merge_cells('B1:E1')
+    c = ws1['B1']
+    c.value = 'REPORTE TRIMESTRAL DE SALVAGUARDAS — MGAS-SERNANP'
+    c.font = Font(bold=True, size=14, color='FFFFFF', name='Arial')
+    c.fill = fill('1F3864')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws1.row_dimensions[1].height = 30
+
+    ws1.merge_cells('B2:E2')
+    c = ws1['B2']
+    c.value = 'EAS 1, 2, 3, 4, 5, 7, 8, 10 — Banco Mundial  |  Proyecto REDD+ Perú'
+    c.font = Font(size=9, color='FFFFFF', name='Arial')
+    c.fill = fill('2E75B6')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws1.row_dimensions[2].height = 16
+
+    ws1.row_dimensions[3].height = 8
+
+    ws1.merge_cells('B4:E4')
+    c = ws1['B4']
+    c.value = '  I.  DATOS DE IDENTIFICACIÓN DEL PROYECTO Y ANP'
+    c.font = Font(bold=True, size=9, color='1F3864', name='Arial')
+    c.fill = fill('D6E4F0')
+    c.alignment = Alignment(horizontal='left', vertical='center')
+    ws1.row_dimensions[4].height = 16
+
+    campos = [
+        (5, 'Nombre del Proyecto REDD+:', p.get('nombre',''), 'Código del Proyecto:', p.get('codigo_proyecto','')),
+        (6, 'Área Natural Protegida (ANP):', p.get('anp',''), 'Código ANP (SERNANP):', p.get('codigo_anp','')),
+        (7, 'Categoría de Manejo:', p.get('categoria',''), 'Año del Reporte:', str(p.get('anio',''))),
+        (8, 'Entidad Ejecutora / UCP:', p.get('entidad',''), 'Trimestre:', p.get('trimestre','')),
+        (9, 'Dependencia SERNANP:', p.get('dependencia',''), 'Período de Reporte:', f"{p.get('periodo_desde','')} al {p.get('periodo_hasta','')}"),
+        (10,'Jefe(a) de ANP:', p.get('jefe',''), 'Fecha de elaboración:', p.get('fecha_elaboracion','')),
+        (11,'Punto Focal de Salvaguardas:', p.get('focal',''), 'N° de Reporte:', p.get('nro_reporte','')),
+        (12,'Responsable del Reporte:', p.get('responsable',''), 'Versión:', p.get('version','1.0')),
+    ]
+    for row, lbl1, val1, lbl2, val2 in campos:
+        ws1.cell(row=row, column=2, value=lbl1).font = Font(bold=True, size=8, color='2E75B6', name='Arial')
+        ws1.cell(row=row, column=2).alignment = Alignment(horizontal='left', vertical='center')
+        c = ws1.cell(row=row, column=3, value=val1)
+        c.font = Font(size=8.5, name='Arial')
+        c.alignment = Alignment(horizontal='left', vertical='center')
+        c.border = Border(bottom=Side(style='thin', color='2E75B6'))
+        ws1.cell(row=row, column=4, value=lbl2).font = Font(bold=True, size=8, color='2E75B6', name='Arial')
+        ws1.cell(row=row, column=4).alignment = Alignment(horizontal='right', vertical='center')
+        c2 = ws1.cell(row=row, column=5, value=val2)
+        c2.font = Font(size=8.5, name='Arial')
+        c2.alignment = Alignment(horizontal='left', vertical='center')
+        c2.border = Border(bottom=Side(style='thin', color='2E75B6'))
+        ws1.row_dimensions[row].height = 16
+
+    # ── EJECUCIÓN TRIMESTRAL ───────────────────────────────────────────────────
+    ws2 = wb.create_sheet('EJECUCIÓN TRIMESTRAL MGAS')
+    ws2.sheet_view.showGridLines = False
+    ws2.column_dimensions['A'].width = 4
+    ws2.column_dimensions['B'].width = 18
+    ws2.column_dimensions['C'].width = 38
+    ws2.column_dimensions['D'].width = 14
+    ws2.column_dimensions['E'].width = 10
+    ws2.column_dimensions['F'].width = 8
+    ws2.column_dimensions['G'].width = 8
+    ws2.column_dimensions['H'].width = 8
+    ws2.column_dimensions['I'].width = 8
+    ws2.column_dimensions['J'].width = 11
+    ws2.column_dimensions['K'].width = 10
+    ws2.column_dimensions['L'].width = 30
+
+    ws2.merge_cells('A1:L1')
+    c = ws2['A1']
+    c.value = 'EJECUCIÓN TRIMESTRAL DE MEDIDAS — MGAS-SERNANP  |  EAS 1, 2, 3, 4, 5, 7, 8, 10 — Banco Mundial'
+    c.font = Font(bold=True, size=10, color='FFFFFF', name='Arial')
+    c.fill = fill('1F3864')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws2.row_dimensions[1].height = 22
+
+    ws2.merge_cells('A2:L2')
+    c = ws2['A2']
+    c.value = f"ANP: {p.get('anp','')}  |  Código: {p.get('codigo_anp','')}  |  {p.get('trimestre','')} Trimestre {p.get('anio','')}  |  Entidad: {p.get('entidad','')}"
+    c.font = Font(size=8.5, color='FFFFFF', name='Arial')
+    c.fill = fill('2E75B6')
+    c.alignment = Alignment(horizontal='left', vertical='center')
+    ws2.row_dimensions[2].height = 14
+
+    headers = ['N°','EAS / Actividad','Indicador / Medida','Unidad de medida','Meta anual','I Trim.','II Trim.','III Trim.','IV Trim.','Total\nejecutado','Avance %','Medio de verificación']
+    for col, h in enumerate(headers, 1):
+        hdr(ws2.cell(row=3, column=col, value=h), wrap=True, size=8)
+    ws2.row_dimensions[3].height = 28
+
+    excel_row = 4
+    data_rows = []
+
+    for item in INDICADORES:
+        if 'eas' in item:
+            ws2.merge_cells(f'A{excel_row}:L{excel_row}')
+            c = ws2[f'A{excel_row}']
+            c.value = '  ' + item['label']
+            c.font = Font(bold=True, color='1F3864', size=8.5, name='Arial')
+            c.fill = fill('D6E4F0')
+            c.alignment = Alignment(horizontal='left', vertical='center')
+            ws2.row_dimensions[excel_row].height = 14
+            excel_row += 1
+        else:
+            n = item['n']
+            key = str(n)
+            ev = ejec.get(key, {})
+            meta = int(ev.get('meta', 0) or 0)
+            t1   = int(ev.get('t1', 0) or 0)
+            t2   = int(ev.get('t2', 0) or 0)
+            t3   = int(ev.get('t3', 0) or 0)
+            t4   = int(ev.get('t4', 0) or 0)
+
+            row_data = [n, item['act'], item['ind'], item['u'], meta, t1, t2, t3, t4]
+            for col, v in enumerate(row_data, 1):
+                c = ws2.cell(row=excel_row, column=col, value=v)
+                if col == 1: dat(c, align='center', fg='666666', size=8)
+                elif col == 2: dat(c, fg='444444', size=8)
+                elif col == 3: dat(c, wrap=True, size=8); ws2.row_dimensions[excel_row].height = 30
+                elif col == 4: dat(c, align='center', fg='444444', size=8)
+                else: dat(c, align='center', bold=(col==5))
+
+            c_tot = ws2.cell(row=excel_row, column=10)
+            c_tot.value = f'=SUM(F{excel_row}:I{excel_row})'
+            calc(c_tot)
+
+            c_pct = ws2.cell(row=excel_row, column=11)
+            c_pct.value = f'=IF(E{excel_row}=0,0,J{excel_row}/E{excel_row})'
+            c_pct.number_format = '0.0%'
+            calc(c_pct)
+
+            mv_link = medios.get(key, {}).get('link', '') or item['mv']
+            c_mv = ws2.cell(row=excel_row, column=12, value=mv_link)
+            dat(c_mv, wrap=True, size=7.5, fg='555555')
+
+            data_rows.append(excel_row)
+            excel_row += 1
+
+    ws2.merge_cells(f'A{excel_row}:I{excel_row}')
+    c = ws2[f'A{excel_row}']
+    c.value = 'NIVEL DE AVANCE TOTAL (suma de ejecución)'
+    c.font = Font(bold=True, size=9, color='FFFFFF', name='Arial')
+    c.fill = fill('2E75B6')
+    c.alignment = Alignment(horizontal='left', vertical='center')
+
+    c_tf = ws2.cell(row=excel_row, column=10)
+    c_tf.value = f'=SUM({",".join([f"J{r}" for r in data_rows])})'
+    c_tf.font = Font(bold=True, size=10, color='FFFFFF', name='Arial')
+    c_tf.fill = fill('2E75B6')
+    c_tf.alignment = Alignment(horizontal='center', vertical='center')
+
+    ws2.merge_cells(f'K{excel_row}:L{excel_row}')
+    ws2.cell(row=excel_row, column=11).fill = fill('2E75B6')
+    ws2.row_dimensions[excel_row].height = 16
+
+    # ── CONCLUSIONES Y FIRMAS ──────────────────────────────────────────────────
+    ws3 = wb.create_sheet('CONCLUSIONES Y FIRMAS')
+    ws3.sheet_view.showGridLines = False
+    ws3.column_dimensions['A'].width = 3
+    ws3.column_dimensions['B'].width = 90
+    ws3.column_dimensions['C'].width = 3
+
+    ws3.merge_cells('B1:B1')
+    c = ws3['B1']
+    c.value = 'CONCLUSIONES, LECCIONES APRENDIDAS Y COMPROMISOS PARA EL SIGUIENTE TRIMESTRE'
+    c.font = Font(bold=True, size=11, color='FFFFFF', name='Arial')
+    c.fill = fill('1F3864')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws3.row_dimensions[1].height = 22
+
+    secciones = [
+        ('Síntesis del estado de cumplimiento de salvaguardas del trimestre', concl.get('sintesis','')),
+        ('Principales logros vs. trimestre anterior', concl.get('logros','')),
+        ('Lecciones aprendidas y buenas prácticas a escalar', concl.get('lecciones','')),
+        ('Compromisos y metas para el siguiente trimestre', concl.get('compromisos','')),
+        ('Recomendaciones al SERNANP / financiadores', concl.get('recomendaciones','')),
+    ]
+    row = 2
+    for titulo, contenido in secciones:
+        ws3.row_dimensions[row].height = 6; row += 1
+        c = ws3.cell(row=row, column=2, value='  ' + titulo)
+        c.font = Font(bold=True, size=9, color='1F3864', name='Arial')
+        c.fill = fill('D6E4F0')
+        c.alignment = Alignment(horizontal='left', vertical='center')
+        ws3.row_dimensions[row].height = 15; row += 1
+        c = ws3.cell(row=row, column=2, value=contenido or '')
+        c.font = Font(size=9, name='Arial')
+        c.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c.border = Border(left=Side(style='thin',color='BDD7EE'), right=Side(style='thin',color='BDD7EE'),
+                          top=Side(style='thin',color='BDD7EE'), bottom=Side(style='thin',color='BDD7EE'))
+        ws3.row_dimensions[row].height = 52; row += 1
+
+    ws3.row_dimensions[row].height = 10; row += 1
+    ws3.merge_cells(f'B{row}:B{row}')
+    c = ws3[f'B{row}']
+    c.value = 'FIRMAS DE CONFORMIDAD'
+    c.font = Font(bold=True, size=9, color='FFFFFF', name='Arial')
+    c.fill = fill('2E75B6')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws3.row_dimensions[row].height = 16; row += 1
+
+    firmas = [p.get('jefe','Jefe(a) de ANP'), p.get('focal','Punto Focal de Salvaguardas'), p.get('responsable','Responsable del Reporte')]
+    ws3.row_dimensions[row].height = 40; row += 1
+    for i, firma in enumerate(firmas):
+        ws3.cell(row=row, column=2, value=f'_________________________\n{firma}').font = Font(size=8.5, name='Arial')
+        ws3.cell(row=row, column=2).alignment = Alignment(horizontal='center', vertical='bottom', wrap_text=True)
+    ws3.row_dimensions[row].height = 36
+
+    # ── MEDIOS DE VERIFICACIÓN ─────────────────────────────────────────────────
+    ws4 = wb.create_sheet('MEDIOS DE VERIFICACIÓN')
+    ws4.sheet_view.showGridLines = False
+    ws4.column_dimensions['A'].width = 4
+    ws4.column_dimensions['B'].width = 16
+    ws4.column_dimensions['C'].width = 36
+    ws4.column_dimensions['D'].width = 22
+    ws4.column_dimensions['E'].width = 42
+    ws4.column_dimensions['F'].width = 14
+
+    ws4.merge_cells('A1:F1')
+    c = ws4['A1']
+    c.value = 'CATÁLOGO DE MEDIOS DE VERIFICACIÓN  |  Registrar el link / ruta de archivo por cada indicador reportado'
+    c.font = Font(bold=True, size=9, color='FFFFFF', name='Arial')
+    c.fill = fill('1F3864')
+    c.alignment = Alignment(horizontal='center', vertical='center')
+    ws4.row_dimensions[1].height = 18
+
+    mv_headers = ['N°','EAS / Salvaguarda','Indicador','Tipo de evidencia','Link / Ruta al documento (Google Drive, repositorio, etc.)','Fecha del documento']
+    for col, h in enumerate(mv_headers, 1):
+        hdr(ws4.cell(row=2, column=col, value=h), size=8)
+    ws4.row_dimensions[2].height = 16
+
+    row4 = 3
+    for item in INDICADORES:
+        if 'eas' in item: continue
+        n = item['n']
+        mv_data = medios.get(str(n), {})
+        link = mv_data.get('link', '')
+        fecha = mv_data.get('fecha', '')
+
+        for col, (v, a) in enumerate([(n,'center'),(item['act'],'left'),(item['ind'],'left'),(item['mv'],'left'),(link,'left'),(fecha,'center')], 1):
+            c = ws4.cell(row=row4, column=col, value=v)
+            c.font = Font(size=7.5, name='Arial', color='185FA5' if col==5 and link else '444444')
+            c.alignment = Alignment(horizontal=a, vertical='center', wrap_text=True)
+            c.border = thin()
+        ws4.row_dimensions[row4].height = 22
+        row4 += 1
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/generar', methods=['POST'])
+def generar():
+    data = request.get_json()
+    p = data.get('portada', {})
+    anp_codigo = p.get('codigo_anp', 'ANP').replace('/', '-')
+    trimestre = p.get('trimestre', 'T')
+    anio = p.get('anio', '2025')
+    filename = f"Reporte_MGAS_{anp_codigo}_{trimestre}Trim_{anio}.xlsx"
+
+    buf = generar_excel(data)
+    return send_file(
+        buf,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=5000)
